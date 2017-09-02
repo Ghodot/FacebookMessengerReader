@@ -1,21 +1,23 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[12]:
 
 
 import re
 import random
 import math
+from copy import deepcopy
 
 
-# In[4]:
+# In[21]:
 
 
 class ConverterTextToVector:
     def __init__(self):
-        self.dictionary = {}
-        self.dictionaryNumberOfOccurrences = {}
+        self.wordToInt = {}
+        self.intToWord = {}
+        self.wordToIntNumberOfOccurrences = {}
         self.index = 0
         pass
     
@@ -39,22 +41,24 @@ class ConverterTextToVector:
         return(word)
     
     def getNumberOfWords(self):
-        return (index+1)
+        return (len(self.wordToInt))
     
     def getNumberOfWordsSeen(self):
         numberOfWordsSeen = 0
-        for word in self.dictionary:
-            numberOfWordsSeen += self.dictionary[word]
+        for word in self.wordToInt:
+            numberOfWordsSeen += self.wordToInt[word]
         return(numberOfWordsSeen)
     
     def considerWord(self,rawWord):
         word = self.clean(rawWord)
         if len(word) > 0:
-            if not word in self.dictionary:
-                self.dictionary[word] = 1
+            if not word in self.wordToInt:
+                self.wordToIntNumberOfOccurrences[word] = 1
+                self.wordToInt[word] = self.index
+                self.intToWord[self.index] = word
                 self.index += 1
             else:
-                self.dictionary[word] += 1
+                self.wordToIntNumberOfOccurrences[word] += 1
                 
         pass
     
@@ -63,59 +67,110 @@ class ConverterTextToVector:
         for word in wordList:
             self.considerWord(word)
         pass
+    
+    def consider(self,sentenceOrWord):
+        self.considerSentence(sentenceOrWord)
         
     
     def getIndexOfWord(self,rawWord):
         word = self.clean(rawWord)
-        if not word in self.dictionary:
+        if not word in self.wordToInt:
             return(-1)
         else:
-            return(self.dictionary[mot])
+            return(self.wordToInt[word])
         pass
+    
+    def changeIndex(self,oldIndex,newIndex):
+        wordToChange = self.intToWord[oldIndex]
+        self.wordToInt[wordToChange] = newIndex
+        self.intToWord[newIndex] = wordToChange
+        
+        self.intToWord.pop(oldIndex)
     
     
     def getNumberOfWords(self):
-        return(len(self.dictionary))
+        return(len(self.wordToInt))
     
     
-    def getVectorFromSentence(self,sentence):
+    def getBooleanVectorFromSentence(self,sentence):
         vector = [False]*self.getNumberOfWords()
         wordList = sentence.split()
         for rawWord in wordList:
-            indexOfWord = self.getIndexOfWord(rawWord)
-            if(indexMotActuel != -1):
-                vector[word] = True
+            word = self.clean(rawWord)
+            indexOfWord = self.getIndexOfWord(word)
+            if(indexOfWord != -1):
+                vector[indexOfWord] = True
         return(vector)
     
     
     def getNumberOccurrencesVectorFromSentence(self,sentence):
         vector = [0]*self.getNumberOfWords()
-        wordList = sentence.split()
+        wordList = self.clean(sentence).split();
         for rawWord in wordList:
-            indexOfWord = self.getIndexOfWord(rawWord)
-            if(indexMotActuel != -1):
-                vector[word] = dictionary[word]
+            word = self.clean(rawWord)
+            indexOfWord = self.getIndexOfWord(word)
+            if(indexOfWord != -1):
+                vector[indexOfWord] += 1
         return(vector)
     
     
-    def prune(self,percentageToKeep,method = "information"):
+    def prune(self,percentageToKeep,method = 'frequency'):
         
         numberOfWords = self.getNumberOfWords()
         numberOfWordsSeen = self.getNumberOfWordsSeen()
+        mean = float(numberOfWordsSeen)/float(numberOfWords)
         
-        numberToKeep = int(percentageToKeep*len(self.dictionary))
+        numberToKeep = int(percentageToKeep*len(self.wordToInt))
+
         
         wordAndEvaluationList =  [None]*numberOfWords
-        for word in self.dictionary:
+        
+        indexWord = 0
+        for word in self.wordToInt:
             critera = 0
             if(method == 'information'):
-                probability = float(self.dictionary[word])/float(numberOfWordsSeen)
-                critera = -probability*math.log(probability)
+                probability = float(self.wordToIntNumberOfOccurrences[word])/float(numberOfWordsSeen)
+                critera = probability*math.log(1/probability)
+            elif(method == 'frequency'):
+                critera = self.wordToIntNumberOfOccurrences[word]
+            elif(method == 'reversedFrequency'):
+                critera = -self.wordToIntNumberOfOccurrences[word]
+            elif(method == 'meanDistance'):
+                critera = abs(numberOfWordsSeen-mean)
+            elif(method == 'random'):
+                critera = int(random.random(numberOfWords))
+                
+            
+            wordAndEvaluationList[indexWord] = (critera,self.wordToInt[word])
+            indexWord += 1
+        
+        wordAndEvaluationList.sort(reverse = True)
+        
+        oldIntToWord = deepcopy(self.intToWord)
+        
+        numberWordsRemoved = 0
+        if(numberToKeep != numberOfWords):
+            for i in range(numberToKeep,numberOfWords):
+                wordToRemove = oldIntToWord[wordAndEvaluationList[i][1]]
+                indexToRemove = self.wordToInt[wordToRemove]
+            
+                
+                self.wordToInt.pop(wordToRemove)
+                self.intToWord.pop(indexToRemove)
+                
+                if(indexToRemove != self.index - 1):
+                    self.changeIndex(self.index-1,indexToRemove)
+                self.index -= 1
+                    
+                numberWordsRemoved += 1
+        
+        
+        return(numberWordsRemoved)
             
         
 
 
-# In[5]:
+# In[24]:
 
 
 class FacebookMessengerReader:
@@ -126,9 +181,9 @@ class FacebookMessengerReader:
         
         self.converterTextToVector = None
         self.percentageMessagesToKeep = 1
-        self.keepMessagesMethod = "random"
+        self.keepMessagesMethod = 'random'
         self.percentageWordsToKeep = 1
-        self.keepWordsMethod = "information"
+        self.keepWordsMethod = 'meanDistance'
         
         
         self.messages = {}
@@ -340,61 +395,96 @@ class FacebookMessengerReader:
         return(self.percentageMessagesToKeep)
     
     
-    def setParametersWordsToKeep(self,percentageWordsToKeep, keepMethod = "information"):
+    def setParametersWordsToKeep(self,percentageWordsToKeep, keepMethod = 'meanDistance'):
         self.percentageWordsToKeep = percentageWordsToKeep
         self.keepWordsMethod = keepMethod
         return(self.percentageWordsToKeep)
     
     
-    def getMatrixTrackedMessages(self,typeOutput = "int"):
+    
+    def compute(self,typeOutput = 'boolean'):
 
         messagesList = self.getTrackedMessagesList("name")
         numberTrackedAuthors = self.getNumberTrackedAuthors()
         
         numberMessagesToKeep = int(self.percentageMessagesToKeep*self.getNumberTrackedMessages())
-        messagesToKeep = [None]*numberMessagesToKeep
+        messagesTuplesToKeep = [None]*numberMessagesToKeep
 
-#        if(numberMessagesToKeep == self.getNumberTrackedMessages()):
-#            indexLastMessage = 0
-#            for author in self.trackedAuthors:
-#                for message in self.messages[author]:
-#                    messagesToKeep[indexLastMessage] = (author,message)
-#                    indexLastMessage += 1
         
         if(self.keepMessagesMethod == "random"):
             messagesList = self.getTrackedMessagesList("id")
             random.shuffle(messagesList)
-            messagesToKeep = messagesList[0:numberMessagesToKeep]
+            messagesTuplesToKeep = messagesList[0:numberMessagesToKeep]
         
-        elif(self.keepMessagesMethod == "equiprobability"):
-            
+        elif(self.keepMessagesMethod == "equiprobability" or self.keepMessagesMethod == "equiprobabilityNoShuffle"):
             dictionaryTrackedMessages = self.getTrackedMessagesDictionnary()
             minimumNumberOfMessages = len(dictionaryTrackedMessages[self.trackedAuthors[0]])
             for author in self.trackedAuthors:
                 minimumNumberOfMessages = min(minimumNumberOfMessages, len(dictionaryTrackedMessages[author]))
             
             
-            
             numberIterations = 0
-            for numberIterations in range(minimumNumberOfMessages):
+            while(numberIterations < minimumNumberOfMessages and numberIterations*numberTrackedAuthors + numberTrackedAuthors < numberMessagesToKeep):
                 for i in range(numberTrackedAuthors):
                     author = self.trackedAuthors[i]
-                    messagesToKeep[numberIterations*numberTrackedAuthors + i] = (i,self.messages[author][numberIterations])
+                    messagesTuplesToKeep[numberIterations*numberTrackedAuthors + i] = (i,self.messages[author][numberIterations])
                 numberIterations += 1
             
-            while(not messagesToKeep[len(messagesToKeep)-1]):
-                messagesToKeep.pop()
-        
-        
-        
-        print(messagesToKeep)
+            while(not messagesTuplesToKeep[len(messagesTuplesToKeep)-1]):
+                messagesTuplesToKeep.pop()
             
+            if(self.keepMessagesMethod == "equiprobability"):
+                random.shuffle(messagesTuplesToKeep)
         
         
         
         self.converterTextToVector = ConverterTextToVector()
-        for author in self.trackedAuthors:
-            for message in self.messages[author]:
-                self.converterTextToVector.considerSentence(message)
+        
+        for messageTuple in messagesTuplesToKeep:
+            self.converterTextToVector.consider(messageTuple[1])
             
+        print(len(self.converterTextToVector.intToWord))
+        print(len(self.converterTextToVector.wordToInt))
+        self.converterTextToVector.prune(self.percentageWordsToKeep,self.keepWordsMethod)
+        print(len(self.converterTextToVector.intToWord))
+        print(len(self.converterTextToVector.wordToInt))
+        
+        
+        matrixMessages = []
+        arrayClasses = []
+        
+        sizeVectors = self.converterTextToVector.getNumberOfWords()
+        
+        if(typeOutput == 'boolean'):
+            for messageTuple in messagesTuplesToKeep:
+                arrayClasses.append(messageTuple[0])
+                matrixMessages.append(self.converterTextToVector.getBooleanVectorFromSentence(messageTuple[1]))
+        elif(typeOutput == 'int'):
+            for messageTuple in messagesTuplesToKeep:
+                arrayClasses.append(messageTuple[0])
+                boolVector = self.converterTextToVector.getBooleanVectorFromSentence(messageTuple[1])
+                for i in range(sizeVectors):
+                    boolVector[i] = int(boolVector[i])
+                matrixMessages.append(boolVector)
+        elif(typeOutput == 'numberOccurences'):
+            for messageTuple in messagesTuplesToKeep:
+                arrayClasses.append(messageTuple[0])
+                matrixMessages.append(self.converterTextToVector.getNumberOccurrencesVectorFromSentence(messageTuple[1]))
+        elif(typeOutput == 'frequency'):
+            numberOfWordsSeen = float(converterTextToVector.getNumberOfWordsSeen())
+            for messageTuple in messagesTuplesToKeep:
+                arrayClasses.append(messageTuple[0])
+                numberOccurencesVector = self.converterTextToVector.getNumberOccurrencesVectorFromSentence(messageTuple[1])
+                for i in range(sizeVectors):
+                    numberOccurencesVector[i] = numberOccurencesVector[i]/numberOfWordsSeen
+                matrixMessages.append(numberOccurencesVector)
+            
+            
+            
+        
+        
+        
+        return{'matrixMessages' : matrixMessages, 'arrayClasses' : arrayClasses, 'intToAuthor' : self.intToAuthor, 'authorToInt' : self.authorToInt}
+        
+        
             
